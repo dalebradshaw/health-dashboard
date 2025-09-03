@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  appleSub  String?  @unique
+  createdAt DateTime @default(now())
+  devices   Device[]
+  samples   Sample[]
+  dailySummaries DailySummary[]
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  name       String?
+  secretHash String
+  createdAt  DateTime @default(now())
+  samples    Sample[]
+
+  @@index([userId])
+}
+
+model Sample {
+  id           String    @id @default(cuid())
+  uuid         String
+  type         String
+  unit         String?
+  start        DateTime
+  end          DateTime
+  valueDecimal Decimal?
+  valueInt     Int?
+  valueText    String?
+  metadataJson Json?
+  createdAt    DateTime  @default(now())
+
+  userId String
+  user   User    @relation(fields: [userId], references: [id])
+
+  deviceId String?
+  device   Device? @relation(fields: [deviceId], references: [id])
+
+  @@unique([uuid, type])
+  @@index([userId, type, start])
+}
+
+model DailySummary {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  date      DateTime
+  type      String
+  metricJson Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, date, type])
+  @@unique([userId, date, type], name: "userId_date_type")
+}

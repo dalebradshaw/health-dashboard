@@ -1,0 +1,13 @@
+{
+  "folders": [
+    { "path": "." },
+    { "path": "mobile" }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.next": true,
+      "mobile/ios/Pods": true,
+      "mobile/android/.gradle": true
+    }
+  }
+}

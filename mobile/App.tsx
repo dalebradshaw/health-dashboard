@@ -10,6 +10,7 @@ import {SafeAreaView, StatusBar, StyleSheet, Text, View, Button, FlatList, Nativ
 import AppleHealthKit, {HealthKitPermissions} from 'react-native-health';
 import { registerDevice } from './src/api/register';
 import { ingestSamples, IngestSample } from './src/api/client';
+import { syncAll } from './src/health/sync';
 
 type Sample = {
   type: string;
@@ -131,6 +132,16 @@ function App(): React.JSX.Element {
     }
   }, [device, samples])
 
+  const anchoredSync = useCallback(async () => {
+    if (!device) return
+    try {
+      const res = await syncAll({ userId, deviceId: device.deviceId, token: device.token })
+      setStatusText(`Synced ${res.uploaded} samples`)
+    } catch (e: any) {
+      setStatusText(`Sync error: ${e?.message ?? e}`)
+    }
+  }, [device])
+
   const ensureDevice = useCallback(async () => {
     if (device) return device
     try {
@@ -146,6 +157,13 @@ function App(): React.JSX.Element {
     init();
     // fire-and-forget register; ok if it fails in simulator
     ensureDevice();
+    // Request native authorization as well
+    try {
+      const Native = (NativeModules as any)?.HealthAnchorsModule
+      if (Native?.requestAuthorization) {
+        Native.requestAuthorization(['heartRate','hrv','steps','activeEnergyBurned']).catch(() => {})
+      }
+    } catch {}
   }, [init, ensureDevice]);
 
   useEffect(() => {
@@ -210,12 +228,12 @@ function App(): React.JSX.Element {
         }
       )
     }
-    const s1 = emitter.addListener('healthKit:HeartRate:new', onHR)
-    const s2 = emitter.addListener('healthKit:StepCount:new', onSteps)
-    const s3 = emitter.addListener('healthKit:HeartRateVariabilitySDNN:new', onHRV)
-    const s4 = emitter.addListener('healthKit:ActiveEnergyBurned:new', onAEB)
+    const s1 = emitter.addListener('healthKit:HeartRate:new', () => { onHR(); anchoredSync(); })
+    const s2 = emitter.addListener('healthKit:StepCount:new', () => { onSteps(); anchoredSync(); })
+    const s3 = emitter.addListener('healthKit:HeartRateVariabilitySDNN:new', () => { onHRV(); anchoredSync(); })
+    const s4 = emitter.addListener('healthKit:ActiveEnergyBurned:new', () => { onAEB(); anchoredSync(); })
     return () => { s1.remove(); s2.remove(); s3.remove(); s4.remove(); }
-  }, [upload])
+  }, [upload, anchoredSync])
 
   return (
     <SafeAreaView style={styles.container}>
@@ -229,6 +247,9 @@ function App(): React.JSX.Element {
       </View>
       <View style={styles.actions}>
         <Button title={device ? 'Upload Samples' : 'Register Device'} onPress={device ? upload : ensureDevice} />
+      </View>
+      <View style={styles.actions}>
+        <Button title="Sync Now" onPress={anchoredSync} disabled={!device} />
       </View>
       <FlatList
         data={samples}

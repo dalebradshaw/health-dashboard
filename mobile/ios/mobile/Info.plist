@@ -22,20 +22,19 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>This app reads your Health data (steps, heart rate, HRV, and more) to power your dashboard.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>This app may write Health data if you choose to enable it.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>This app reads your Health data (steps, heart rate, HRV, and more) to power your dashboard.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>This app may write Health data if you choose to enable it.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
 	<key>UILaunchStoryboardName</key>

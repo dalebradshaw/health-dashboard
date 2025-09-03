@@ -15,6 +15,7 @@ export async function ingestSamples(params: {
   deviceId: string
   token?: string
   samples: IngestSample[]
+  deletes?: { uuid: string; type: string }[]
 }) {
   const res = await fetch(`${API_BASE_URL}/api/health/ingest`, {
     method: 'POST',
@@ -22,7 +23,7 @@ export async function ingestSamples(params: {
       'Content-Type': 'application/json',
       Authorization: params.token ? `Bearer ${params.token}` : '',
     },
-    body: JSON.stringify({ userId: params.userId, deviceId: params.deviceId, samples: params.samples }),
+    body: JSON.stringify({ userId: params.userId, deviceId: params.deviceId, samples: params.samples, deletes: params.deletes ?? [] }),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -30,4 +31,3 @@ export async function ingestSamples(params: {
   }
   return res.json()
 }
-

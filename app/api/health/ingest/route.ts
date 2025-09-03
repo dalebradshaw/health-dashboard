@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
     }
 
     const samples = body.samples as Array<{ type: string; unit?: string; start: string; end: string; value: number | string; uuid?: string; metadata?: any }>
+    const deletes = (Array.isArray(body.deletes) ? body.deletes : []) as Array<{ uuid: string; type: string }>
 
     // Upsert samples by (uuid, type) when uuid provided, else insert
     const ops = samples.map((s) => {
@@ -52,8 +53,9 @@ export async function POST(req: NextRequest) {
       return prisma.sample.create({ data })
     })
 
-    const results = await prisma.$transaction(ops, { timeout: 15000 })
-    return new Response(JSON.stringify({ ok: true, inserted: results.length }), { status: 200 })
+    const deleteOps = deletes.map((d) => prisma.sample.deleteMany({ where: { uuid: d.uuid, type: d.type, userId: body.userId as string } }))
+    const results = await prisma.$transaction([...ops, ...deleteOps], { timeout: 20000 })
+    return new Response(JSON.stringify({ ok: true, inserted: ops.length, deleted: deleteOps.length }), { status: 200 })
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message ?? 'Unknown error' }), { status: 500 })
   }

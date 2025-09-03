@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import React
 
 @objc(HealthAnchorsModule)
 class HealthAnchorsModule: NSObject {
@@ -20,14 +21,17 @@ class HealthAnchorsModule: NSObject {
 
   @objc(sync:resolver:rejecter:)
   func sync(_ types: [String], resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    let sampleTypes = types.compactMap { self.quantityType(for: $0) }
-    if sampleTypes.isEmpty { resolve(["samples": []]); return }
+    let qtyTypes = types.compactMap { self.quantityType(for: $0) }
+    let catTypes = types.compactMap { self.categoryType(for: $0) }
+    if qtyTypes.isEmpty && catTypes.isEmpty { resolve(["samples": []]); return }
 
     let group = DispatchGroup()
     var out: [[String: Any]] = []
+    var deletesOut: [[String: Any]] = []
     var lastError: Error?
 
-    for qt in sampleTypes {
+    // Quantity types (HR, HRV, steps, energy)
+    for qt in qtyTypes {
       group.enter()
       let anchorKey = self.anchorKey(for: qt)
       var anchor: HKQueryAnchor? = nil
@@ -35,12 +39,14 @@ class HealthAnchorsModule: NSObject {
         anchor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
       }
 
-      let query = HKAnchoredObjectQuery(type: qt, predicate: nil, anchor: anchor, limit: HKObjectQueryNoLimit) { [weak self] (_, samplesOrNil, _, newAnchor, error) in
+      let query = HKAnchoredObjectQuery(type: qt, predicate: nil, anchor: anchor, limit: HKObjectQueryNoLimit) { [weak self] (_, samplesOrNil, deletedObjects, newAnchor, error) in
         defer { group.leave() }
         if let error = error { lastError = error; return }
         guard let strongSelf = self else { return }
+        // Do not persist here; return token to JS to commit after successful upload
         if let newAnchor = newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
-          strongSelf.ud.set(data, forKey: anchorKey)
+          let token = data.base64EncodedString()
+          out.append(["type": "__anchor__", "forType": strongSelf.typeString(for: qt), "token": token])
         }
         guard let samples = samplesOrNil as? [HKQuantitySample] else { return }
         let unit = strongSelf.unit(for: qt)
@@ -56,19 +62,74 @@ class HealthAnchorsModule: NSObject {
           ]
           out.append(item)
         }
+        if let dels = deletedObjects {
+          for d in dels { deletesOut.append(["type": strongSelf.typeString(for: qt), "uuid": d.uuid.uuidString]) }
+        }
+      }
+      store.execute(query)
+    }
+
+    // Category types (Sleep)
+    for ct in catTypes {
+      group.enter()
+      let anchorKey = "HKAnchor-\(ct.identifier)"
+      var anchor: HKQueryAnchor? = nil
+      if let data = ud.data(forKey: anchorKey) {
+        anchor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+      }
+      let query = HKAnchoredObjectQuery(type: ct, predicate: nil, anchor: anchor, limit: HKObjectQueryNoLimit) { [weak self] (_, samplesOrNil, deletedObjects, newAnchor, error) in
+        defer { group.leave() }
+        if let error = error { lastError = error; return }
+        guard let strongSelf = self else { return }
+        // Defer persistence; return token for commit
+        if let newAnchor = newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+          let token = data.base64EncodedString()
+          out.append(["type": "__anchor__", "forType": "sleep", "token": token])
+        }
+        guard let samples = samplesOrNil as? [HKCategorySample] else { return }
+        for s in samples {
+          // Only consider asleep values; ignore inBed if desired
+          if let asleep = HKCategoryValueSleepAnalysis(rawValue: s.value), asleep == .asleep || asleep == .asleepCore || asleep == .asleepDeep || asleep == .asleepREM {
+            let mins = s.endDate.timeIntervalSince(s.startDate) / 60.0
+            let item: [String: Any] = [
+              "type": "sleep",
+              "start": ISO8601DateFormatter().string(from: s.startDate),
+              "end": ISO8601DateFormatter().string(from: s.endDate),
+              "value": mins,
+              "unit": "min",
+              "uuid": s.uuid.uuidString,
+            ]
+            out.append(item)
+          }
+        }
+        if let dels = deletedObjects {
+          for d in dels { deletesOut.append(["type": "sleep", "uuid": d.uuid.uuidString]) }
+        }
       }
       store.execute(query)
     }
 
     group.notify(queue: .main) {
       if let err = lastError { reject("sync_error", err.localizedDescription, err); return }
-      resolve(["samples": out])
+      // Split out anchors and data for clarity
+      var samples: [[String: Any]] = []
+      var anchors: [String: String] = [:]
+      for item in out {
+        if let t = item["type"] as? String, t == "__anchor__" {
+          if let ft = item["forType"] as? String, let token = item["token"] as? String { anchors[ft] = token }
+        } else {
+          samples.append(item)
+        }
+      }
+      resolve(["samples": samples, "anchors": anchors, "deletes": deletesOut])
     }
   }
 
   // MARK: - Helpers
   private func sampleType(for t: String) -> HKSampleType? {
-    return quantityType(for: t)
+    if let q = quantityType(for: t) { return q }
+    if let c = categoryType(for: t) { return c }
+    return nil
   }
 
   private func quantityType(for t: String) -> HKQuantityType? {
@@ -77,6 +138,13 @@ class HealthAnchorsModule: NSObject {
     case "hrv": return HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)
     case "steps": return HKObjectType.quantityType(forIdentifier: .stepCount)
     case "activeEnergyBurned": return HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)
+    default: return nil
+    }
+  }
+
+  private func categoryType(for t: String) -> HKCategoryType? {
+    switch t {
+    case "sleep": return HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
     default: return nil
     }
   }
@@ -113,5 +181,24 @@ class HealthAnchorsModule: NSObject {
 
   private func anchorKey(for qt: HKQuantityType) -> String {
     return "HKAnchor-\(typeString(for: qt))"
+  }
+
+  private func anchorKeyForTypeString(_ t: String) -> String? {
+    if let qt = quantityType(for: t) { return anchorKey(for: qt) }
+    if t == "sleep" { return "HKAnchor-\(HKCategoryTypeIdentifier.sleepAnalysis.rawValue)" }
+    return nil
+  }
+
+  @objc(commitAnchor:token:resolver:rejecter:)
+  func commitAnchor(_ type: String, token: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    guard let key = anchorKeyForTypeString(type) else { resolve(false); return }
+    guard let data = Data(base64Encoded: token) else { resolve(false); return }
+    // Validate token decodes to an anchor
+    if (try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)) != nil {
+      ud.set(data, forKey: key)
+      resolve(true)
+    } else {
+      resolve(false)
+    }
   }
 }

@@ -15,6 +15,7 @@ export function HealthCardRow() {
   const [hrUpdated, setHrUpdated] = useState<string>("")
   const [stepsUpdated, setStepsUpdated] = useState<string>("")
   const [sleepText, setSleepText] = useState<string>("No data")
+  const [sleepSeries, setSleepSeries] = useState<{ name: string; count: number }[]>([])
 
   useEffect(() => {
     const now = new Date()
@@ -53,11 +54,12 @@ export function HealthCardRow() {
         setHr7Series(s)
       }).catch(() => {})
 
-    // Sleep: fetch last 2 days and use yesterday's bucket
-    const fetchSleep = fetch(`/api/health/summary?type=sleep&days=2`)
+    // Sleep: fetch last 7 days and show bars; also compute last night
+    const fetchSleep = fetch(`/api/health/summary?type=sleep&days=7`)
       .then(r => r.json())
       .then((j) => {
         const series = (j?.series ?? []) as { name: string; count: number }[]
+        setSleepSeries(series)
         const y = series.length >= 2 ? series[series.length - 2] : series[0]
         const mins = Math.round(Number(y?.count || 0))
         const h = Math.floor(mins / 60)
@@ -75,6 +77,7 @@ export function HealthCardRow() {
 
   const stepsChartData = useMemo(() => stepsSeries.map(s => ({ name: s.name.slice(5), count: s.count })), [stepsSeries])
   const hr7ChartData = useMemo(() => [{ id: '7D Avg HR', data: hr7Series.map(p => ({ x: p.name.slice(5), y: Number(p.count.toFixed(0)) })) }], [hr7Series])
+  const sleepChartData = useMemo(() => sleepSeries.map(s => ({ name: s.name.slice(5), count: Number((s.count/60).toFixed(1)) })), [sleepSeries])
 
   return (
     <div className="flex flex-col gap-6">
@@ -128,7 +131,7 @@ export function HealthCardRow() {
           <CardHeader className="flex flex-row items-start gap-4 p-6">
             <div className="grid gap-1.5">
               <CardTitle>Sleep Analysis</CardTitle>
-              <CardDescription>Last night</CardDescription>
+              <CardDescription>Last night {sleepText !== 'No data' ? `• ${sleepText}` : ''}</CardDescription>
             </div>
             <Button className="ml-auto w-8 h-8 rounded-full border" size="icon" variant="outline">
               <PlusIcon className="w-4 h-4" />
@@ -136,7 +139,7 @@ export function HealthCardRow() {
             </Button>
           </CardHeader>
           <CardContent className="flex items-center justify-center p-6">
-            <div className="text-2xl font-semibold">{sleepText}</div>
+            <BarChart className="h-[100px] w-full aspect-[2/1]" data={sleepChartData} hideXAxis />
           </CardContent>
         </Card>
       </div>

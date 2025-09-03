@@ -5,12 +5,16 @@
  * @format
  */
 
-import React, {useCallback, useEffect, useState} from 'react';
-import {SafeAreaView, StatusBar, StyleSheet, Text, View, Button, FlatList, NativeEventEmitter, NativeModules} from 'react-native';
+import React, {useCallback, useEffect, useState, useRef} from 'react';
+import {SafeAreaView, StatusBar, StyleSheet, Text, View, Button, FlatList, NativeEventEmitter, NativeModules, AppState} from 'react-native';
 import AppleHealthKit, {HealthKitPermissions} from 'react-native-health';
 import { registerDevice } from './src/api/register';
-import { ingestSamples, IngestSample } from './src/api/client';
-import { syncAll } from './src/health/sync';
+import { IngestSample } from './src/api/client';
+import { collectAnchoredSamples } from './src/health/sync';
+import { enqueue, flush } from './src/health/queue';
+import { loadDevice, saveDevice } from './src/device';
+import BackgroundFetch from 'react-native-background-fetch';
+import NetInfo from '@react-native-community/netinfo';
 
 type Sample = {
   type: string;
@@ -40,7 +44,11 @@ function App(): React.JSX.Element {
   const [samples, setSamples] = useState<Sample[]>([]);
   const [statusText, setStatusText] = useState<string>('');
   const [device, setDevice] = useState<{ deviceId: string; token: string } | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string>('');
+  const [logs, setLogs] = useState<string[]>([]);
+  const log = useCallback((msg: string) => setLogs(prev => [new Date().toLocaleTimeString() + ' ' + msg, ...prev].slice(0, 100)), []);
   const userId = 'demo-user'; // TODO: replace with real auth id
+  const lastBgSyncRef = useRef<number>(0)
 
   const init = useCallback(() => {
     AppleHealthKit.initHealthKit(permissions, (error) => {
@@ -51,8 +59,9 @@ function App(): React.JSX.Element {
       }
       setAuthorized(true);
       setStatusText('HealthKit authorized');
+      log('HealthKit authorized');
     });
-  }, []);
+  }, [log]);
 
   const loadToday = useCallback(() => {
     const start = new Date();
@@ -125,38 +134,89 @@ function App(): React.JSX.Element {
       value: s.value,
     }))
     try {
-      const res = await ingestSamples({ userId, deviceId: device.deviceId, token: device.token, samples: payload })
-      setStatusText(`Uploaded ${res.inserted ?? payload.length} samples`)
+      await enqueue(payload)
+      const res = await flush({ userId, deviceId: device.deviceId, token: device.token })
+      setStatusText(`Queued ${payload.length}, sent ${res.sent}, remaining ${res.remaining}`)
+      if (res.sent > 0) { setLastSyncAt(new Date().toLocaleTimeString()); log(`Flushed ${res.sent} samples`) }
     } catch (e: any) {
-      setStatusText(`Upload error: ${e?.message ?? e}`)
+      const m = `Upload error: ${e?.message ?? e}`; setStatusText(m); log(m)
     }
   }, [device, samples])
 
   const anchoredSync = useCallback(async () => {
     if (!device) return
     try {
-      const res = await syncAll({ userId, deviceId: device.deviceId, token: device.token })
-      setStatusText(`Synced ${res.uploaded} samples`)
+      const result = await collectAnchoredSamples()
+      await enqueue(result.samples, result.anchors, result.deletes)
+      const res = await flush({ userId, deviceId: device.deviceId, token: device.token })
+      setStatusText(`Synced ${result.samples.length}; sent ${res.sent}, remaining ${res.remaining}`)
+      if (res.sent > 0) { setLastSyncAt(new Date().toLocaleTimeString()); log(`Synced ${res.sent} samples`) }
     } catch (e: any) {
-      setStatusText(`Sync error: ${e?.message ?? e}`)
+      const m = `Sync error: ${e?.message ?? e}`; setStatusText(m); log(m)
     }
-  }, [device])
+  }, [device, log])
+
+  useEffect(() => {
+    // Background Fetch: run anchored sync opportunistically
+    const setup = async () => {
+      try {
+        await BackgroundFetch.configure({ minimumFetchInterval: 15, enableHeadless: false, startOnBoot: true, stopOnTerminate: false }, async (taskId) => {
+          log(`BGFetch event: ${taskId}`)
+          if (device) {
+            const now = Date.now()
+            if (now - lastBgSyncRef.current > 5 * 60 * 1000) {
+              await anchoredSync()
+              lastBgSyncRef.current = now
+            }
+          }
+          BackgroundFetch.finish(taskId)
+        }, (e) => log(`BGFetch configure error: ${e}`))
+        await BackgroundFetch.start()
+        log('BGFetch started')
+      } catch (e: any) {
+        log(`BGFetch error: ${e?.message ?? e}`)
+      }
+    }
+    setup()
+  }, [device, anchoredSync, log])
+
+  useEffect(() => {
+    // Network-aware flush: when connection is regained, try flushing
+    const unsub = NetInfo.addEventListener(async (state) => {
+      if (state.isConnected && device) {
+        const res = await flush({ userId, deviceId: device.deviceId, token: device.token })
+        if (res.sent > 0) { setLastSyncAt(new Date().toLocaleTimeString()); log(`NetInfo flush sent ${res.sent}`) }
+      }
+    })
+    return () => unsub()
+  }, [device, log])
 
   const ensureDevice = useCallback(async () => {
     if (device) return device
+    // Load from AsyncStorage (no Keychain)
+    const stored = await loadDevice()
+    if (stored) { setDevice(stored); return stored }
     try {
       const d = await registerDevice({ userId, deviceName: 'iPhone' })
-      setDevice({ deviceId: d.deviceId, token: d.token })
-      return { deviceId: d.deviceId, token: d.token }
+      const creds = { deviceId: d.deviceId, token: d.token }
+      await saveDevice(creds)
+      setDevice(creds)
+      return creds
     } catch (e: any) {
-      setStatusText(`Register error: ${e?.message ?? e}`)
+      const m = `Register error: ${e?.message ?? e}`; setStatusText(m); log(m)
     }
-  }, [device])
+  }, [device, log])
 
   useEffect(() => {
     init();
     // fire-and-forget register; ok if it fails in simulator
-    ensureDevice();
+    ensureDevice().then(async (d) => {
+      if (d) {
+        // Auto-flush on app start
+        const res = await flush({ userId, deviceId: d.deviceId, token: d.token })
+        if (res.sent > 0) { setLastSyncAt(new Date().toLocaleTimeString()); log(`Auto-flush sent ${res.sent}`) }
+      }
+    });
     // Request native authorization as well
     try {
       const Native = (NativeModules as any)?.HealthAnchorsModule
@@ -164,7 +224,23 @@ function App(): React.JSX.Element {
         Native.requestAuthorization(['heartRate','hrv','steps','activeEnergyBurned']).catch(() => {})
       }
     } catch {}
-  }, [init, ensureDevice]);
+  }, [init, ensureDevice, log]);
+
+  useEffect(() => {
+    // Periodic flush every 5 minutes while app is foregrounded
+    let interval: any
+    const startInterval = () => {
+      if (interval || !device) return
+      interval = setInterval(async () => {
+        const res = await flush({ userId, deviceId: device.deviceId, token: device.token })
+        if (res.sent > 0) { setLastSyncAt(new Date().toLocaleTimeString()); log(`Periodic flush sent ${res.sent}`) }
+      }, 5 * 60 * 1000)
+    }
+    const stopInterval = () => { if (interval) { clearInterval(interval); interval = null } }
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') startInterval(); else stopInterval() })
+    startInterval()
+    return () => { stopInterval(); sub.remove() }
+  }, [device, log])
 
   useEffect(() => {
     // Background observers from react-native-health
@@ -240,7 +316,7 @@ function App(): React.JSX.Element {
       <StatusBar barStyle={'dark-content'} />
       <View style={styles.header}>
         <Text style={styles.title}>HealthKit Sandbox</Text>
-        <Text style={styles.subtitle}>{statusText}</Text>
+        <Text style={styles.subtitle}>{statusText}{lastSyncAt ? ` • Last sync ${lastSyncAt}` : ''}</Text>
       </View>
       <View style={styles.actions}>
         <Button title={authorized ? 'Reload Today' : 'Authorize HealthKit'} onPress={authorized ? loadToday : init} />
@@ -263,6 +339,10 @@ function App(): React.JSX.Element {
         ItemSeparatorComponent={() => <View style={styles.sep} />}
         contentContainerStyle={styles.list}
       />
+      <View style={{padding:16}}>
+        <Text style={{fontWeight:'600'}}>Logs</Text>
+        {logs.slice(0,6).map((l, i) => (<Text key={i} style={{color:'#666', fontSize:12}}>{l}</Text>))}
+      </View>
     </SafeAreaView>
   );
 }

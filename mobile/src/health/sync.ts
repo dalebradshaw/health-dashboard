@@ -16,19 +16,28 @@ async function setAnchor(key: string, value: string) {
   try { await AsyncStorage.setItem(key, value) } catch {}
 }
 
-export async function syncAll(params: { userId: string; deviceId: string; token: string }) {
+export type DeleteRef = { uuid: string; type: string }
+
+export async function collectAnchoredSamples(): Promise<{ samples: IngestSample[], anchors?: Record<string,string>, deletes?: DeleteRef[] }> {
   const now = new Date()
   const startOfDay = new Date(now); startOfDay.setHours(0,0,0,0)
 
   const samples: IngestSample[] = []
+  let anchors: Record<string,string> | undefined
+  let deletes: DeleteRef[] | undefined
 
   // Prefer native anchored sync for HR/HRV if available
   const Native = (NativeModules as any)?.HealthAnchorsModule
   let nativeUsed = false
   if (Native && typeof Native.sync === 'function') {
     try {
-      const result = await Native.sync(['heartRate','hrv','steps','activeEnergyBurned'])
+      const result = await Native.sync(['heartRate','hrv','steps','activeEnergyBurned','sleep'])
       const list: any[] = result?.samples || []
+      anchors = result?.anchors || undefined
+      const dels: any[] = result?.deletes || []
+      if (dels?.length) {
+        deletes = dels.map(d => ({ uuid: String(d.uuid), type: String(d.type) }))
+      }
       for (const r of list) {
         samples.push({ type: r.type, unit: r.unit, start: r.start, end: r.end, value: r.value, uuid: r.uuid })
       }
@@ -93,8 +102,17 @@ export async function syncAll(params: { userId: string; deviceId: string; token:
     })
   } catch {}
 
-  if (!samples.length) return { uploaded: 0 }
+  return { samples, anchors, deletes }
+}
 
-  const res = await ingestSamples({ userId: params.userId, deviceId: params.deviceId, token: params.token, samples })
+export async function syncAll(params: { userId: string; deviceId: string; token: string }) {
+  const { samples, anchors, deletes } = await collectAnchoredSamples()
+  if (!samples.length) return { uploaded: 0 }
+  const res = await ingestSamples({ userId: params.userId, deviceId: params.deviceId, token: params.token, samples, deletes })
+  // Commit anchors on success
+  const Native = (NativeModules as any)?.HealthAnchorsModule
+  if (anchors && Native?.commitAnchor) {
+    for (const [t, token] of Object.entries(anchors)) { try { await Native.commitAnchor(t, token) } catch {} }
+  }
   return { uploaded: res?.inserted ?? samples.length }
 }

@@ -15,6 +15,8 @@
 		6132EF182BDFF13200BBE14D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6132EF172BDFF13200BBE14D /* PrivacyInfo.xcprivacy */; };
 		7699B88040F8A987B510C191 /* libPods-mobile-mobileTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 19F6CBCC0A4E27FBF8BF4A61 /* libPods-mobile-mobileTests.a */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		A1F0C1E31D23456700ABCDEF /* HealthAnchorsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C1E01D23456700ABCDEF /* HealthAnchorsModule.swift */; };
+		A1F0C1E41D23456700ABCDEF /* HealthAnchorsModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C1E11D23456700ABCDEF /* HealthAnchorsModule.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,9 +47,9 @@
 		6132EF172BDFF13200BBE14D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = mobile/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = mobile/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		89C6BE57DB24E9ADA2F236DE /* Pods-mobile-mobileTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-mobile-mobileTests.release.xcconfig"; path = "Target Support Files/Pods-mobile-mobileTests/Pods-mobile-mobileTests.release.xcconfig"; sourceTree = "<group>"; };
-		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		A1F0C1E01D23456700ABCDEF /* HealthAnchorsModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthAnchorsModule.swift; sourceTree = "<group>"; };
 		A1F0C1E11D23456700ABCDEF /* HealthAnchorsModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HealthAnchorsModule.m; sourceTree = "<group>"; };
+		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -409,11 +411,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXBuildFile section (added) */
-		A1F0C1E31D23456700ABCDEF /* HealthAnchorsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C1E01D23456700ABCDEF /* HealthAnchorsModule.swift */; };
-		A1F0C1E41D23456700ABCDEF /* HealthAnchorsModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C1E11D23456700ABCDEF /* HealthAnchorsModule.m */; };
-/* End PBXBuildFile section (added) */
-
 /* Begin PBXTargetDependency section */
 		00E356F51AD99517003FC87E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -485,6 +482,7 @@
 				DEVELOPMENT_TEAM = 96LK9T734W;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = mobile/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -514,6 +512,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 96LK9T734W;
 				INFOPLIST_FILE = mobile/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

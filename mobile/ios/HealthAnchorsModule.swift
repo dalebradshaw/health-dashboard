@@ -88,18 +88,27 @@ class HealthAnchorsModule: NSObject {
         }
         guard let samples = samplesOrNil as? [HKCategorySample] else { return }
         for s in samples {
-          // Only consider asleep values; ignore inBed if desired
-          if let asleep = HKCategoryValueSleepAnalysis(rawValue: s.value), asleep == .asleep || asleep == .asleepCore || asleep == .asleepDeep || asleep == .asleepREM {
-            let mins = s.endDate.timeIntervalSince(s.startDate) / 60.0
-            let item: [String: Any] = [
-              "type": "sleep",
-              "start": ISO8601DateFormatter().string(from: s.startDate),
-              "end": ISO8601DateFormatter().string(from: s.endDate),
-              "value": mins,
-              "unit": "min",
-              "uuid": s.uuid.uuidString,
-            ]
-            out.append(item)
+          let mins = s.endDate.timeIntervalSince(s.startDate) / 60.0
+          if let stage = HKCategoryValueSleepAnalysis(rawValue: s.value) {
+            var t: String? = nil
+            switch stage {
+            case .asleepREM: t = "sleepREM"
+            case .asleepDeep: t = "sleepDeep"
+            case .asleepCore: t = "sleepCore" // iOS 16+
+            case .asleep: t = "sleepCore" // map unspecified asleep to core
+            default: t = nil // ignore awake/inBed
+            }
+            if let tp = t {
+              let item: [String: Any] = [
+                "type": tp,
+                "start": ISO8601DateFormatter().string(from: s.startDate),
+                "end": ISO8601DateFormatter().string(from: s.endDate),
+                "value": mins,
+                "unit": "min",
+                "uuid": s.uuid.uuidString,
+              ]
+              out.append(item)
+            }
           }
         }
         if let dels = deletedObjects {

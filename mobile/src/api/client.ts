@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config'
+import { Platform } from 'react-native'
 
 export type IngestSample = {
   type: string
@@ -23,7 +24,17 @@ export async function ingestSamples(params: {
       'Content-Type': 'application/json',
       Authorization: params.token ? `Bearer ${params.token}` : '',
     },
-    body: JSON.stringify({ userId: params.userId, deviceId: params.deviceId, samples: params.samples, deletes: params.deletes ?? [] }),
+    body: JSON.stringify({
+      userId: params.userId,
+      deviceId: params.deviceId,
+      samples: params.samples,
+      deletes: params.deletes ?? [],
+      meta: {
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
+        os: Platform.OS,
+        osVersion: String(Platform.Version),
+      },
+    }),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

@@ -11,6 +11,7 @@ import AppleHealthKit, {HealthKitPermissions} from 'react-native-health';
 import { registerDevice } from './src/api/register';
 import { IngestSample } from './src/api/client';
 import { collectAnchoredSamples } from './src/health/sync';
+import { backfillDays } from './src/health/backfill';
 import { enqueue, flush } from './src/health/queue';
 import { loadDevice, saveDevice } from './src/device';
 import BackgroundFetch from 'react-native-background-fetch';
@@ -49,6 +50,7 @@ function App(): React.JSX.Element {
   const log = useCallback((msg: string) => setLogs(prev => [new Date().toLocaleTimeString() + ' ' + msg, ...prev].slice(0, 100)), []);
   const userId = 'demo-user'; // TODO: replace with real auth id
   const lastBgSyncRef = useRef<number>(0)
+  const backfillCancelRef = useRef<boolean>(false)
 
   const init = useCallback(() => {
     AppleHealthKit.initHealthKit(permissions, (error) => {
@@ -221,7 +223,7 @@ function App(): React.JSX.Element {
     try {
       const Native = (NativeModules as any)?.HealthAnchorsModule
       if (Native?.requestAuthorization) {
-        Native.requestAuthorization(['heartRate','hrv','steps','activeEnergyBurned']).catch(() => {})
+        Native.requestAuthorization(['heartRate','hrv','steps','activeEnergyBurned','sleep']).catch(() => {})
       }
     } catch {}
   }, [init, ensureDevice, log]);
@@ -326,6 +328,15 @@ function App(): React.JSX.Element {
       </View>
       <View style={styles.actions}>
         <Button title="Sync Now" onPress={anchoredSync} disabled={!device} />
+      </View>
+      <View style={styles.actions}>
+        <Button title="Backfill 30 Days" onPress={async ()=>{ if (!device) return; backfillCancelRef.current = false; setStatusText('Backfilling 30 days...'); await backfillDays({ days: 30, userId, deviceId: device.deviceId, token: device.token, log, shouldCancel: ()=>backfillCancelRef.current }); setStatusText('Backfill complete'); }} disabled={!device} />
+      </View>
+      <View style={styles.actions}>
+        <Button title="Backfill 90 Days" onPress={async ()=>{ if (!device) return; backfillCancelRef.current = false; setStatusText('Backfilling 90 days...'); await backfillDays({ days: 90, userId, deviceId: device.deviceId, token: device.token, log, shouldCancel: ()=>backfillCancelRef.current }); setStatusText('Backfill complete'); }} disabled={!device} />
+      </View>
+      <View style={styles.actions}>
+        <Button title="Cancel Backfill" color="#b00" onPress={()=>{ backfillCancelRef.current = true; setStatusText('Backfill cancel requested'); log('Backfill cancel requested') }} />
       </View>
       <FlatList
         data={samples}

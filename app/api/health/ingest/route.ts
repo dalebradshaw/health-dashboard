@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
 
     const samples = body.samples as Array<{ type: string; unit?: string; start: string; end: string; value: number | string; uuid?: string; metadata?: any }>
     const deletes = (Array.isArray(body.deletes) ? body.deletes : []) as Array<{ uuid: string; type: string }>
+    const meta = body.meta ?? {}
 
     // Upsert samples by (uuid, type) when uuid provided, else insert
     const ops = samples.map((s) => {
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
         unit: s.unit ?? null,
         start: new Date(s.start),
         end: new Date(s.end),
-        metadataJson: s.metadata ?? null,
+        metadataJson: { ...(s.metadata ?? {}), __meta: meta },
         userId: body.userId as string,
         deviceId: body.deviceId as string,
         ...value,

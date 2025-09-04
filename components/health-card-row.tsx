@@ -15,7 +15,10 @@ export function HealthCardRow() {
   const [hrUpdated, setHrUpdated] = useState<string>("")
   const [stepsUpdated, setStepsUpdated] = useState<string>("")
   const [sleepText, setSleepText] = useState<string>("No data")
-  const [sleepSeries, setSleepSeries] = useState<{ name: string; count: number }[]>([])
+  const [sleepSeriesREM, setSleepSeriesREM] = useState<{ name: string; count: number }[]>([])
+  const [sleepSeriesCore, setSleepSeriesCore] = useState<{ name: string; count: number }[]>([])
+  const [sleepSeriesDeep, setSleepSeriesDeep] = useState<{ name: string; count: number }[]>([])
+  const [sleepPct, setSleepPct] = useState<{ REM: number; Core: number; Deep: number } | null>(null)
 
   useEffect(() => {
     const now = new Date()
@@ -54,20 +57,53 @@ export function HealthCardRow() {
         setHr7Series(s)
       }).catch(() => {})
 
-    // Sleep: fetch last 7 days and show bars; also compute last night
-    const fetchSleep = fetch(`/api/health/summary?type=sleep&days=7`)
+    // Sleep: fetch last 7 days for each stage and compute last night
+    const fetchSleepREM = fetch(`/api/health/summary?type=sleepREM&days=7`)
       .then(r => r.json())
       .then((j) => {
         const series = (j?.series ?? []) as { name: string; count: number }[]
-        setSleepSeries(series)
-        const y = series.length >= 2 ? series[series.length - 2] : series[0]
-        const mins = Math.round(Number(y?.count || 0))
-        const h = Math.floor(mins / 60)
-        const m = mins % 60
-        if (mins > 0) setSleepText(`${h}h ${m}m`)
+        setSleepSeriesREM(series)
+      }).catch(() => {})
+    const fetchSleepCore = fetch(`/api/health/summary?type=sleepCore&days=7`)
+      .then(r => r.json())
+      .then((j) => {
+        const series = (j?.series ?? []) as { name: string; count: number }[]
+        setSleepSeriesCore(series)
+      }).catch(() => {})
+    const fetchSleepDeep = fetch(`/api/health/summary?type=sleepDeep&days=7`)
+      .then(r => r.json())
+      .then((j) => {
+        const series = (j?.series ?? []) as { name: string; count: number }[]
+        setSleepSeriesDeep(series)
       }).catch(() => {})
 
-    void Promise.all([fetchHR, fetchSteps, fetchHR7, fetchSleep])
+    void Promise.all([fetchHR, fetchSteps, fetchHR7, fetchSleepREM, fetchSleepCore, fetchSleepDeep]).then(async () => {
+      // If all stage series are empty, fallback to aggregated 'sleep'
+      const stagesEmpty = (!sleepSeriesREM.length && !sleepSeriesCore.length && !sleepSeriesDeep.length)
+      if (stagesEmpty) {
+        try {
+          const j = await fetch(`/api/health/summary?type=sleep&days=7`).then(r => r.json())
+          const series = (j?.series ?? []) as { name: string; count: number }[]
+          setSleepSeriesCore(series)
+        } catch {}
+      }
+      // compute last night from stages or fallback
+      const get = (arr: { name: string; count: number }[]) => arr.length >= 2 ? arr[arr.length-2]?.count ?? 0 : (arr[0]?.count ?? 0)
+      const rem = get(sleepSeriesREM)
+      const core = get(sleepSeriesCore)
+      const deep = get(sleepSeriesDeep)
+      const mins = Math.round(rem + core + deep)
+      if (mins > 0) {
+        const h = Math.floor(mins / 60)
+        const m = mins % 60
+        setSleepText(`${h}h ${m}m`)
+        setSleepPct({
+          REM: Math.round((rem / mins) * 100),
+          Core: Math.round((core / mins) * 100),
+          Deep: Math.round((deep / mins) * 100),
+        })
+      }
+    })
   }, [])
 
   const hrChartData = useMemo(() => {
@@ -77,7 +113,28 @@ export function HealthCardRow() {
 
   const stepsChartData = useMemo(() => stepsSeries.map(s => ({ name: s.name.slice(5), count: s.count })), [stepsSeries])
   const hr7ChartData = useMemo(() => [{ id: '7D Avg HR', data: hr7Series.map(p => ({ x: p.name.slice(5), y: Number(p.count.toFixed(0)) })) }], [hr7Series])
-  const sleepChartData = useMemo(() => sleepSeries.map(s => ({ name: s.name.slice(5), count: Number((s.count/60).toFixed(1)) })), [sleepSeries])
+  const sleepChartData = useMemo(() => {
+    const keys = new Set<string>()
+    const byDate = new Map<string, any>()
+    const add = (series: { name: string; count: number }[], key: string) => {
+      series.forEach((p) => {
+        const k = p.name.slice(5)
+        const row = byDate.get(k) ?? { name: k }
+        row[key] = Number((p.count/60).toFixed(1))
+        byDate.set(k, row)
+        keys.add(key)
+      })
+    }
+    if (sleepSeriesREM.length || sleepSeriesDeep.length) {
+      add(sleepSeriesREM, 'REM')
+      add(sleepSeriesCore, 'Core')
+      add(sleepSeriesDeep, 'Deep')
+    } else {
+      // Fallback: treat Core series as total sleep if stages are empty
+      add(sleepSeriesCore, 'Total')
+    }
+    return { data: Array.from(byDate.values()), keys: Array.from(keys) as string[] }
+  }, [sleepSeriesREM, sleepSeriesCore, sleepSeriesDeep])
 
   return (
     <div className="flex flex-col gap-6">
@@ -94,7 +151,7 @@ export function HealthCardRow() {
             </Button>
           </CardHeader>
           <CardContent className="flex items-center justify-center p-6">
-            <CurvedlineChart className="h-[100px] w-full aspect-[2/1]" data={hrChartData} />
+            <CurvedlineChart className="h-[100px] w-full aspect-[2/1]" data={hrChartData} yUnit="BPM" />
           </CardContent>
         </Card>
         <Card className="rounded-2xl bg-yellow-500 dark:bg-yellow-400">
@@ -109,7 +166,7 @@ export function HealthCardRow() {
             </Button>
           </CardHeader>
           <CardContent className="flex items-center justify-center p-6">
-            <BarChart className="h-[100px] w-full aspect-[2/1]" data={stepsChartData} hideXAxis />
+            <BarChart className="h-[100px] w-full aspect-[2/1]" data={stepsChartData} showXAxis yUnit="steps" />
           </CardContent>
         </Card>
         <Card className="rounded-2xl bg-yellow-500 dark:bg-yellow-400">
@@ -124,7 +181,7 @@ export function HealthCardRow() {
             </Button>
           </CardHeader>
           <CardContent className="flex items-center justify-center p-6">
-            <CurvedlineChart className="h-[100px] w-full aspect-[2/1]" data={hr7ChartData} />
+            <CurvedlineChart className="h-[100px] w-full aspect-[2/1]" data={hr7ChartData} yUnit="BPM" />
           </CardContent>
         </Card>
         <Card className="rounded-2xl bg-yellow-500 dark:bg-yellow-400">
@@ -138,8 +195,15 @@ export function HealthCardRow() {
               <span className="sr-only">Add</span>
             </Button>
           </CardHeader>
-          <CardContent className="flex items-center justify-center p-6">
-            <BarChart className="h-[100px] w-full aspect-[2/1]" data={sleepChartData} hideXAxis />
+          <CardContent className="flex flex-col gap-2 items-center justify-center p-6">
+            <BarChart className="h-[100px] w-full aspect-[2/1]" data={sleepChartData.data} keysProp={sleepChartData.keys} showXAxis yUnit="h" />
+            {sleepPct && (
+              <div className="text-xs text-gray-700 dark:text-gray-300">
+                <span className="inline-flex items-center mr-3"><span style={{background:'#60a5fa'}} className="inline-block w-2 h-2 rounded-full mr-1"></span>REM {sleepPct.REM}%</span>
+                <span className="inline-flex items-center mr-3"><span style={{background:'#2563eb'}} className="inline-block w-2 h-2 rounded-full mr-1"></span>Core {sleepPct.Core}%</span>
+                <span className="inline-flex items-center"><span style={{background:'#1e40af'}} className="inline-block w-2 h-2 rounded-full mr-1"></span>Deep {sleepPct.Deep}%</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -169,7 +233,7 @@ function PlusIcon(props: JSX.IntrinsicAttributes & SVGProps<SVGSVGElement>) {
 }
 
 
-function CurvedlineChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLDivElement> & HTMLAttributes<HTMLDivElement>) & { data?: any[] }) {
+function CurvedlineChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLDivElement> & HTMLAttributes<HTMLDivElement>) & { data?: any[], yUnit?: string }) {
   return (
     <div {...props}>
       <ResponsiveLine
@@ -186,19 +250,18 @@ function CurvedlineChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLD
         curve="monotoneX"
         axisTop={null}
         axisRight={null}
-        axisBottom={{
-          tickSize: 0,
-          tickPadding: 16,
-        }}
-        axisLeft={{
-          tickSize: 0,
-          tickValues: 5,
-          tickPadding: 16,
-        }}
+        axisBottom={{ tickSize: 0, tickPadding: 8 }}
+        axisLeft={{ tickSize: 0, tickValues: 5, tickPadding: 8, legend: props.yUnit ?? '', legendOffset: -35, legendPosition: 'middle' }}
         colors={["#2563eb", "#e11d48"]}
         pointSize={6}
         useMesh={true}
         gridYValues={6}
+        tooltip={({ point }) => (
+          <div style={{ background: '#111', color: '#fff', padding: 6, borderRadius: 4 }}>
+            <div>{String(point.data.xFormatted)}</div>
+            <div style={{ fontWeight: 600 }}>{Number(point.data.yFormatted).toFixed(0)} {props.yUnit ?? ''}</div>
+          </div>
+        )}
         theme={{
           tooltip: {
             chip: {
@@ -223,27 +286,29 @@ function CurvedlineChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLD
 }
 
 
-function BarChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLDivElement> & HTMLAttributes<HTMLDivElement>) & { data?: any[], hideXAxis?: boolean }) {
+function BarChart(props: (JSX.IntrinsicAttributes & ClassAttributes<HTMLDivElement> & HTMLAttributes<HTMLDivElement>) & { data?: any[], hideXAxis?: boolean, keysProp?: string[], colorsProp?: string[], yUnit?: string, tooltipFormat?: (d:{name:string, key:string, value:number})=>string, showXAxis?: boolean }) {
   return (
     <div {...props}>
       <ResponsiveBar
         data={props.data ?? []}
-        keys={["count"]}
+        keys={props.keysProp ?? ["count"]}
         indexBy="name"
         margin={{ top: 0, right: 0, bottom: 30, left: 30 }}
         padding={0.3}
-        colors={["#2563eb"]}
-        axisBottom={props.hideXAxis ? null : {
+        colors={props.colorsProp ?? ["#2563eb", "#60a5fa", "#1e40af"]}
+        axisBottom={props.hideXAxis ? null : (props.showXAxis ? {
           tickSize: 0,
           tickPadding: 8,
           tickRotation: 0,
-        }}
-        axisLeft={{
-          tickSize: 0,
-          tickValues: 3,
-          tickPadding: 8,
-        }}
+        } : null)}
+        axisLeft={{ tickSize: 0, tickValues: 3, tickPadding: 8, legend: props.yUnit ?? '', legendOffset: -35, legendPosition: 'middle' }}
         gridYValues={4}
+        tooltip={({ id, value, indexValue }) => (
+          <div style={{ background: '#111', color: '#fff', padding: 6, borderRadius: 4 }}>
+            <div>{String(indexValue)}</div>
+            <div style={{ fontWeight: 600 }}>{props.tooltipFormat ? props.tooltipFormat({ name: String(indexValue), key: String(id), value: Number(value) }) : `${String(id)}: ${Number(value).toLocaleString()} ${props.yUnit ?? ''}`}</div>
+          </div>
+        )}
         theme={{
           tooltip: {
             chip: {

@@ -1,0 +1,172 @@
+openapi: 3.0.3
+info:
+  title: Health Dashboard API
+  version: 0.1.0
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/devices/register:
+    post:
+      summary: Register a device and issue a token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterDeviceRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterDeviceResponse' }
+  /api/health/ingest:
+    post:
+      summary: Ingest HealthKit samples (idempotent) and deletions
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestResponse' }
+  /api/health/query:
+    get:
+      summary: Query raw samples by type/time window
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueryResponse' }
+  /api/health/summary:
+    get:
+      summary: Daily rollups
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema: { type: string }
+        - in: query
+          name: days
+          schema: { type: integer, default: 7 }
+        - in: query
+          name: agg
+          schema: { type: string, enum: [sum, avg] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SummaryResponse' }
+  /api/cron/rollup:
+    post:
+      summary: Compute daily rollups (use with Vercel Cron)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  description: YYYY-MM-DD (defaults to yesterday)
+      responses:
+        '200': { description: OK }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    RegisterDeviceRequest:
+      type: object
+      required: [userId]
+      properties:
+        userId: { type: string }
+        deviceName: { type: string }
+    RegisterDeviceResponse:
+      type: object
+      required: [deviceId, token]
+      properties:
+        deviceId: { type: string }
+        token: { type: string }
+        deviceName: { type: string }
+    IngestSample:
+      type: object
+      required: [type, start, end, value]
+      properties:
+        uuid: { type: string }
+        type:
+          type: string
+          enum: [heartRate, hrv, steps, activeEnergyBurned, sleepREM, sleepCore, sleepDeep, sleep]
+        unit: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        value: { oneOf: [{ type: number }, { type: string }] }
+        metadata: { type: object, additionalProperties: true }
+    IngestRequest:
+      type: object
+      required: [userId, deviceId, samples]
+      properties:
+        userId: { type: string }
+        deviceId: { type: string }
+        samples: { type: array, items: { $ref: '#/components/schemas/IngestSample' } }
+        deletes:
+          type: array
+          items:
+            type: object
+            required: [uuid, type]
+            properties:
+              uuid: { type: string }
+              type: { type: string }
+        meta:
+          type: object
+          properties:
+            timezoneOffsetMinutes: { type: integer }
+            os: { type: string }
+            osVersion: { type: string }
+    IngestResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        inserted: { type: integer }
+        deleted: { type: integer }
+    QueryResponse:
+      type: object
+      properties:
+        type: { type: string }
+        from: { type: string }
+        to: { type: string }
+        interval: { type: string }
+        datapoints:
+          type: array
+          items:
+            type: object
+            properties:
+              t0: { type: string, format: date-time }
+              t1: { type: string, format: date-time }
+              value: { oneOf: [{ type: number }, { type: string }] }
+              unit: { type: string }
+    SummaryResponse:
+      type: object
+      properties:
+        type: { type: string }
+        days: { type: integer }
+        agg: { type: string }
+        series:
+          type: array
+          items: { type: object, properties: { name: { type: string }, count: { type: number } } }
